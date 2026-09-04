@@ -13,9 +13,11 @@ import os
 import re
 import json
 import time
+import calendar
 import hashlib
 import requests
 import feedparser
+from email.utils import parsedate_to_datetime
 from datetime import datetime, timedelta, timezone
 
 # ---------------------------------------------------------------------------
@@ -27,6 +29,12 @@ TELEGRAM_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 
 SEEN_FILE = "data/seen_ids.json"
 SEEN_RETENTION_HOURS = 72  # trim old entries so the file doesn't grow forever
+
+# Ignore any news item older than this, regardless of whether it's "new" to
+# the dedup file. Set a bit wider than the run interval (runs every ~3 hours)
+# to allow for slow-to-index articles, without letting week/month-old stuff
+# resurface through a keyword search.
+RECENCY_WINDOW_HOURS = 8
 
 # Fallback static list if the NSE F&O CSV fetch fails.
 # Replace/extend as needed. Full official list changes quarterly.
@@ -207,6 +215,42 @@ def score_materiality(item):
     return score
 
 
+def parse_item_datetime(ts_str):
+    """
+    Try several date formats since NSE, Google News, and RSS feeds all
+    write timestamps differently. Returns a timezone-aware datetime, or
+    None if it genuinely can't be parsed (caller decides what to do then).
+    """
+    if not ts_str:
+        return None
+    # Most RSS/Google News dates are RFC-822 style, e.g. "Thu, 04 Sep 2026 12:00:00 GMT"
+    try:
+        dt = parsedate_to_datetime(ts_str)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except Exception:
+        pass
+    # Fallback formats sometimes seen from NSE-style feeds
+    for fmt in ("%d-%b-%Y %H:%M:%S", "%Y-%m-%d %H:%M:%S", "%d-%m-%Y %H:%M:%S"):
+        try:
+            return datetime.strptime(ts_str, fmt).replace(tzinfo=timezone.utc)
+        except Exception:
+            continue
+    return None
+
+
+def is_recent_enough(item):
+    """True if the item is within RECENCY_WINDOW_HOURS. If we can't parse
+    the timestamp at all, we keep NSE items (exchange filings are almost
+    always genuinely fresh) but drop everything else to be safe."""
+    dt = parse_item_datetime(item.get("ts"))
+    if dt is None:
+        return item["source"] == "NSE"
+    age_hours = (datetime.now(timezone.utc) - dt).total_seconds() / 3600
+    return -1 <= age_hours <= RECENCY_WINDOW_HOURS  # small negative buffer for clock skew
+
+
 def item_id(item):
     raw = item.get("url") or f"{item['source']}|{item['headline']}"
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
@@ -266,6 +310,8 @@ def main():
     alerts_by_symbol = {}
 
     for item in raw_items:
+        if not is_recent_enough(item):
+            continue
         iid = item_id(item)
         if iid in seen:
             continue
