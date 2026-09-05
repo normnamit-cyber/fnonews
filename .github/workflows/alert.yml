@@ -2,10 +2,15 @@ name: FNO News Alert
 
 on:
   schedule:
-    # Times in UTC. IST = UTC + 5:30.
-    # 04:00 UTC = 9:30 IST | 07:00 = 12:30 IST | 10:00 = 15:30 IST
-    # 13:00 UTC = 18:30 IST | 16:00 = 21:30 IST
-    - cron: "0 4,7,10,13,16 * * 1-5"   # weekdays only
+    # All times below are UTC. IST = UTC + 5:30.
+    # Market-hours checks every ~90 minutes, a 3pm final/recap report,
+    # and a post-market check around 8pm for after-hours announcements.
+    - cron: "0 4 * * 1-5"     # 09:30 IST
+    - cron: "30 5 * * 1-5"    # 11:00 IST
+    - cron: "0 7 * * 1-5"     # 12:30 IST
+    - cron: "30 8 * * 1-5"    # 14:00 IST
+    - cron: "30 9 * * 1-5"    # 15:00 IST — Final Report + Full-Day Recap
+    - cron: "30 14 * * 1-5"   # 20:00 IST — Post-Market Update
   workflow_dispatch: {}   # lets you manually trigger a run from the Actions tab
 
 permissions:
