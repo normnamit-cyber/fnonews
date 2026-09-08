@@ -498,4 +498,15 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        import traceback
+        error_summary = f"{type(e).__name__}: {e}"
+        print(f"[fatal] News bot crashed: {error_summary}")
+        traceback.print_exc()
+        try:
+            send_telegram(f"🔴 *News bot crashed*\n{error_summary}\n\nCheck the GitHub Actions log for details.")
+        except Exception:
+            pass
+        raise
